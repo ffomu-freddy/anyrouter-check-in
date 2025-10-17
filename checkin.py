@@ -18,6 +18,7 @@ from notify import notify
 
 load_dotenv()
 
+
 BALANCE_HASH_FILE = 'balance_hash.txt'
 
 
@@ -48,6 +49,9 @@ def load_accounts():
 			if 'name' in account and not account['name']:
 				print(f'ERROR: Account {i + 1} name field cannot be empty')
 				return None
+			# 如果没有 url 字段，使用默认值
+			if 'url' not in account or not account['url']:
+				account['url'] = 'https://anyrouter.top'
 
 		return accounts_data
 	except Exception as e:
@@ -103,7 +107,7 @@ def parse_cookies(cookies_data):
 	return {}
 
 
-async def get_waf_cookies_with_playwright(account_name: str):
+async def get_waf_cookies_with_playwright(account_name: str, base_url: str):
 	"""使用 Playwright 获取 WAF cookies（隐私模式）"""
 	print(f'[PROCESSING] {account_name}: Starting browser to get WAF cookies...')
 
@@ -129,7 +133,7 @@ async def get_waf_cookies_with_playwright(account_name: str):
 			try:
 				print(f'[PROCESSING] {account_name}: Step 1: Access login page to get initial cookies...')
 
-				await page.goto('https://anyrouter.top/login', wait_until='networkidle')
+				await page.goto(f'{base_url}/login', wait_until='networkidle')
 
 				try:
 					await page.wait_for_function('document.readyState === "complete"', timeout=5000)
@@ -167,10 +171,10 @@ async def get_waf_cookies_with_playwright(account_name: str):
 				return None
 
 
-def get_user_info(client, headers):
+def get_user_info(client, headers, base_url):
 	"""获取用户信息"""
 	try:
-		response = client.get('https://anyrouter.top/api/user/self', headers=headers, timeout=30)
+		response = client.get(f'{base_url}/api/user/self', headers=headers, timeout=30)
 
 		if response.status_code == 200:
 			data = response.json()
@@ -197,6 +201,7 @@ async def check_in_account(account_info, account_index):
 	# 解析账号配置
 	cookies_data = account_info.get('cookies', {})
 	api_user = account_info.get('api_user', '')
+	base_url = account_info.get('url', 'https://anyrouter.top')
 
 	if not api_user:
 		print(f'[FAILED] {account_name}: API user identifier not found')
@@ -209,7 +214,7 @@ async def check_in_account(account_info, account_index):
 		return False, None
 
 	# 步骤1：获取 WAF cookies
-	waf_cookies = await get_waf_cookies_with_playwright(account_name)
+	waf_cookies = await get_waf_cookies_with_playwright(account_name, base_url)
 	if not waf_cookies:
 		print(f'[FAILED] {account_name}: Unable to get WAF cookies')
 		return False, None
@@ -227,8 +232,8 @@ async def check_in_account(account_info, account_index):
 			'Accept': 'application/json, text/plain, */*',
 			'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
 			'Accept-Encoding': 'gzip, deflate, br, zstd',
-			'Referer': 'https://anyrouter.top/console',
-			'Origin': 'https://anyrouter.top',
+			'Referer': f'{base_url}/console',
+			'Origin': base_url,
 			'Connection': 'keep-alive',
 			'Sec-Fetch-Dest': 'empty',
 			'Sec-Fetch-Mode': 'cors',
@@ -236,7 +241,7 @@ async def check_in_account(account_info, account_index):
 			'new-api-user': api_user,
 		}
 
-		user_info = get_user_info(client, headers)
+		user_info = get_user_info(client, headers, base_url)
 		if user_info and user_info.get('success'):
 			print(user_info['display'])
 		elif user_info:
@@ -248,7 +253,7 @@ async def check_in_account(account_info, account_index):
 		checkin_headers = headers.copy()
 		checkin_headers.update({'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'})
 
-		response = client.post('https://anyrouter.top/api/user/sign_in', headers=checkin_headers, timeout=30)
+		response = client.post(f'{base_url}/api/user/sign_in', headers=checkin_headers, timeout=30)
 
 		print(f'[RESPONSE] {account_name}: Response status code {response.status_code}')
 
@@ -398,7 +403,7 @@ async def main():
 		notify_content = '\n\n'.join([time_info, '\n'.join(notification_content), '\n'.join(summary)])
 
 		print(notify_content)
-		notify.push_message('AnyRouter Check-in Alert', notify_content, msg_type='text')
+		notify.push_message('AnyRouter签到通知', notify_content, msg_type='text')
 		print('[NOTIFY] Notification sent due to failures or balance changes')
 	else:
 		print('[INFO] All accounts successful and no balance changes detected, notification skipped')
